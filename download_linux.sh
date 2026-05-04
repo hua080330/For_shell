@@ -1,12 +1,19 @@
 #!/bin/bash
 
 # Qiusuo Mathmatica Download Script for Linux
-# Repo: https://gitee.com/qssxmathmatica/qssx
+# Repo: https://github.com/hua080330/qssx
 
-REPO_OWNER="qssxmathmatica"
+REPO_OWNER="hua080330"
 REPO_NAME="qssx"
-TOKEN="90bf089b807622662ccd8b2dbcb2aa07"
-API_URL="https://gitee.com/api/v5/repos/$REPO_OWNER/$REPO_NAME/contents/?access_token=$TOKEN"
+API_URL="https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/contents/"
+
+# GitHub 加速代理列表
+PROXY_LIST=(
+    "https://ghproxy.net/https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/main/"
+    "https://ghproxy.com/https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/main/"
+    "https://hub.fastgit.xyz/https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/main/"
+    "https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/main/"
+)
 
 # Colorful ASCII Art Logo
 echo -e "\033[31m"
@@ -42,55 +49,43 @@ echo -e "\033[0m"
 echo -e "\033[33m            === Quantum Scale Download Station ===\033[0m"
 echo ""
 
-# Detect download tool
-if command -v curl &> /dev/null; then
-    DOWNLOAD_CMD="curl -L -o"
-    USE_CURL=1
-elif command -v wget &> /dev/null; then
-    DOWNLOAD_CMD="wget -O"
-    USE_CURL=0
-else
-    echo -e "\033[31m[-] Neither curl nor wget found. Please install one of them.\033[0m"
+# Check for curl
+if ! command -v curl &> /dev/null; then
+    echo -e "\033[31m[-] curl not found. Please install curl first.\033[0m"
     echo "  Ubuntu/Debian: sudo apt install curl"
     echo "  CentOS/RHEL: sudo yum install curl"
     read -p "Press Enter to exit"
     exit 1
 fi
 
-echo -e "\033[32m[+] Fetching file list from Gitee...\033[0m"
+echo -e "\033[32m[+] Fetching file list from GitHub...\033[0m"
 
-# Get file list
-if [ $USE_CURL -eq 1 ]; then
-    RESPONSE=$(curl -s "$API_URL")
-else
-    RESPONSE=$(wget -q -O - "$API_URL")
-fi
+# Get file list from GitHub API
+RESPONSE=$(curl -s "$API_URL")
 
-# Parse files
-FILE_LIST=$(echo "$RESPONSE" | grep -o '"name":"[^"]*","type":"file"[^}]*"size":[0-9]*' | sed 's/"name":"//g' | sed 's/","type":"file",.*"size"://g')
+# Parse file names
+FILE_NAMES=$(echo "$RESPONSE" | grep -o '"name":"[^"]*"' | sed 's/"name":"//g' | sed 's/"//g')
 
-if [ -z "$FILE_LIST" ]; then
+if [ -z "$FILE_NAMES" ]; then
     echo -e "\033[31m[-] Cannot fetch file list. Please check network.\033[0m"
     read -p "Press Enter to exit"
     exit 1
 fi
 
 # Display file list
-declare -a NAMES
-declare -a SIZES
-INDEX=1
-
 echo -e "\n\033[36m[*] Available Files:\033[0m"
 echo -e "\033[90m==================================================\033[0m"
-while IFS=':' read -r NAME SIZE; do
+
+INDEX=1
+declare -a NAMES
+while IFS= read -r NAME; do
     if [ -n "$NAME" ]; then
         NAMES+=("$NAME")
-        SIZES+=("$SIZE")
-        KB_SIZE=$(echo "scale=2; $SIZE/1024" | bc)
-        echo -e "\033[33m [$INDEX]\033[0m \033[37m$NAME\033[0m \033[90m($KB_SIZE KB)\033[0m"
+        echo -e "\033[33m [$INDEX]\033[0m \033[37m$NAME\033[0m"
         ((INDEX++))
     fi
-done <<< "$FILE_LIST"
+done <<< "$FILE_NAMES"
+
 echo -e "\033[90m==================================================\033[0m"
 
 if [ ${#NAMES[@]} -eq 0 ]; then
@@ -116,20 +111,29 @@ if [ $SELECTED_INDEX -lt 0 ] || [ $SELECTED_INDEX -ge ${#NAMES[@]} ]; then
 fi
 
 SELECTED_NAME="${NAMES[$SELECTED_INDEX]}"
-DOWNLOAD_URL="https://gitee.com/$REPO_OWNER/$REPO_NAME/raw/main/$(echo "$SELECTED_NAME" | sed 's/ /%20/g')"
 
-# Download file
+# Try each proxy to download
 echo -e "\n\033[36m[+] Downloading: $SELECTED_NAME ...\033[0m"
-if [ $USE_CURL -eq 1 ]; then
-    curl -L -o "$SELECTED_NAME" "$DOWNLOAD_URL"
-else
-    wget -O "$SELECTED_NAME" "$DOWNLOAD_URL"
-fi
 
-if [ $? -eq 0 ]; then
-    echo -e "\033[32m[+] Download completed! Saved to: $(pwd)/$SELECTED_NAME\033[0m"
-else
-    echo -e "\033[31m[-] Download failed.\033[0m"
+DOWNLOAD_SUCCESS=0
+for PROXY in "${PROXY_LIST[@]}"; do
+    DOWNLOAD_URL="${PROXY}${SELECTED_NAME}"
+    echo -e "\033[90m[.] Trying: ${PROXY}\033[0m"
+    
+    curl -L -o "$SELECTED_NAME" --connect-timeout 5 "$DOWNLOAD_URL"
+    
+    if [ $? -eq 0 ] && [ -f "$SELECTED_NAME" ] && [ -s "$SELECTED_NAME" ]; then
+        echo -e "\033[32m[+] Download completed! Saved to: $(pwd)/$SELECTED_NAME\033[0m"
+        DOWNLOAD_SUCCESS=1
+        break
+    else
+        echo -e "\033[31m[-] Failed, trying next proxy...\033[0m"
+        rm -f "$SELECTED_NAME"
+    fi
+done
+
+if [ $DOWNLOAD_SUCCESS -eq 0 ]; then
+    echo -e "\033[31m[-] All download sources failed. Please try again later.\033[0m"
 fi
 
 echo ""
