@@ -1,8 +1,5 @@
 # ============================================================
-# Qiusuo Mathmatica Interactive Downloader v2.0
-# ============================================================
-# A powerful interactive downloader with Metasploit-like CLI
-# Commands: list, search, dl, bg, jobs, fg, stop, set, show, save, use, add, muldl, info, help
+# Qiusuo Mathmatica Interactive Downloader v2.0 (Fixed)
 # ============================================================
 
 #requires -Version 5.0
@@ -43,7 +40,7 @@ $script:logFile = Join-Path $script:configDir "logs\download.log"
 $script:statsFile = Join-Path $script:configDir "stats.json"
 $script:profilesDir = Join-Path $script:configDir "profiles"
 
-# 创建配置目录
+# 创建配置目录（修复：先创建主目录，再创建子目录）
 if (-not (Test-Path $script:configDir)) {
     New-Item -ItemType Directory -Path $script:configDir -Force | Out-Null
 }
@@ -110,6 +107,11 @@ function Write-Log {
     param([string]$Message, [string]$Level = "INFO")
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $logEntry = "[$timestamp] [$Level] $Message"
+    # 确保日志目录存在
+    $logDir = Split-Path $script:logFile -Parent
+    if (-not (Test-Path $logDir)) {
+        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+    }
     Add-Content -Path $script:logFile -Value $logEntry -ErrorAction SilentlyContinue
 }
 
@@ -127,6 +129,17 @@ function Format-FileSize {
     else {
         return "$Bytes B"
     }
+}
+
+# 修复：新增一个返回字节数的辅助函数
+function Get-SpeedInBytes {
+    param([string]$SpeedString)
+    if ($SpeedString -eq "0 B/s") { return 0 }
+    $number = [regex]::Match($SpeedString, '[\d\.]+').Value
+    if ($SpeedString -match 'KB/s') { return [double]$number * 1024 }
+    if ($SpeedString -match 'MB/s') { return [double]$number * 1024 * 1024 }
+    if ($SpeedString -match 'GB/s') { return [double]$number * 1024 * 1024 * 1024 }
+    return [double]$number
 }
 
 function Get-FileIcon {
@@ -169,11 +182,18 @@ function Load-Config {
         }
         catch {
             Write-ErrorMsg "Failed to load config file" "Using default settings"
-            $script:config = $script:defaultConfig.Clone()
+            # 修复：创建新的哈希表而不是克隆
+            $script:config = @{}
+            foreach ($key in $script:defaultConfig.Keys) {
+                $script:config[$key] = $script:defaultConfig[$key]
+            }
         }
     }
     else {
-        $script:config = $script:defaultConfig.Clone()
+        $script:config = @{}
+        foreach ($key in $script:defaultConfig.Keys) {
+            $script:config[$key] = $script:defaultConfig[$key]
+        }
         Save-Config
     }
 }
@@ -233,12 +253,18 @@ function Load-Profile {
     }
 }
 #endregion
+
 #region Display Config
 function Show-Config {
     Write-Host "`n[*] Current Configuration:" -ForegroundColor Cyan
     Write-Host ("=" * 65) -ForegroundColor DarkGray
     Write-Host "  DOWNLOAD_DIR   = $($script:config.DOWNLOAD_DIR)" -ForegroundColor White
-    Write-Host "  PROXY_INDEX    = $($script:config.PROXY_INDEX) ($($script:proxyList[$script:config.PROXY_INDEX-1]))" -ForegroundColor White
+    $proxyIdx = $script:config.PROXY_INDEX - 1
+    if ($proxyIdx -ge 0 -and $proxyIdx -lt $script:proxyList.Count) {
+        Write-Host "  PROXY_INDEX    = $($script:config.PROXY_INDEX) ($($script:proxyList[$proxyIdx]))" -ForegroundColor White
+    } else {
+        Write-Host "  PROXY_INDEX    = $($script:config.PROXY_INDEX) (invalid)" -ForegroundColor Yellow
+    }
     Write-Host "  THREADS        = $($script:config.THREADS)" -ForegroundColor White
     Write-Host "  SPEED_LIMIT    = $($script:config.SPEED_LIMIT) KB/s (0 = unlimited)" -ForegroundColor White
     Write-Host "  RESUME         = $($script:config.RESUME)" -ForegroundColor White
@@ -395,6 +421,7 @@ function Show-Repos {
     Write-Host ("=" * 50) -ForegroundColor DarkGray
 }
 #endregion
+
 #region File List Functions
 function Update-FileList {
     Write-InfoMsg "Fetching file list from $script:repoOwner/$script:repoName..."
@@ -465,6 +492,7 @@ function Show-FileList {
             Write-Host " $icon $($file.name)" -ForegroundColor White -NoNewline
             Write-Host " ($sizeStr)" -ForegroundColor Gray -NoNewline
             Write-Host " $dateStr" -ForegroundColor DarkGray
+            Write-Host ""  # 添加换行
         }
         
         Write-Host ("=" * 80) -ForegroundColor DarkGray
@@ -515,19 +543,31 @@ function Search-Files {
     Write-Host "`n[*] Search Results for '$Pattern' ($($results.Count) matches):" -ForegroundColor Cyan
     Write-Host ("=" * 75) -ForegroundColor DarkGray
     
+    # 修复：正确获取每个文件的索引位置
+    $fileList = $script:fileCache  # 转换为数组以便使用 IndexOf
+    
     foreach ($file in $results) {
-        $globalIdx = ($script:fileCache | ForEach-Object { $_.name } | Where-Object { $_ -eq $file.name }).Count
-        $magNo = ($script:fileCache.IndexOf($file) + 1).ToString("000000")
+        # 修复：使用数组索引查找
+        $indexInCache = -1
+        for ($idx = 0; $idx -lt $fileList.Count; $idx++) {
+            if ($fileList[$idx].name -eq $file.name -and $fileList[$idx].size -eq $file.size) {
+                $indexInCache = $idx
+                break
+            }
+        }
+        $magNo = ($indexInCache + 1).ToString("000000")
         $sizeStr = Format-FileSize -Bytes $file.size
         $icon = Get-FileIcon -FileName $file.name
         
         Write-Host " [$magNo]" -ForegroundColor Yellow -NoNewline
         Write-Host " $icon $($file.name)" -ForegroundColor White -NoNewline
         Write-Host " ($sizeStr)" -ForegroundColor Gray
+        Write-Host ""  # 添加换行
     }
     Write-Host ("=" * 75) -ForegroundColor DarkGray
 }
 #endregion
+
 #region Download Functions
 function Get-DownloadUrl {
     param([string]$FileName)
@@ -620,7 +660,7 @@ function Download-File {
                     }
                     else {
                         Write-InfoMsg "Starting fresh download"
-                        Remove-Item $tempPath -Force
+                        Remove-Item $tempPath -Force -ErrorAction SilentlyContinue
                     }
                 }
                 else {
@@ -630,7 +670,7 @@ function Download-File {
             }
             else {
                 Write-InfoMsg "Resume disabled. Starting fresh download"
-                Remove-Item $tempPath -Force
+                Remove-Item $tempPath -Force -ErrorAction SilentlyContinue
             }
         }
         elseif ($existingSize -eq $fileSize) {
@@ -640,7 +680,7 @@ function Download-File {
     }
     
     # Confirm download (skip for background jobs)
-    if (-not $Background -and $script:config.AUTO_CONFIRM) {
+    if (-not $Background -and -not $script:config.AUTO_CONFIRM) {
         $confirm = Read-Host "[?] Download '$fileName' ($sizeStr) to '$($script:config.DOWNLOAD_DIR)'? (y/n)"
         if ($confirm -ne 'y' -and $confirm -ne 'Y') {
             Write-InfoMsg "Download cancelled"
@@ -653,46 +693,74 @@ function Download-File {
     $threads = if ($CustomThreads -gt 0) { $CustomThreads } else { $script:config.THREADS }
     $speedLimit = if ($CustomSpeedLimit -gt 0) { $CustomSpeedLimit } else { $script:config.SPEED_LIMIT }
     
-    Write-InfoMsg "Downloading: $fileName ($sizeStr) with $threads threads"
+    Write-InfoMsg "Downloading: $fileName ($sizeStr)"
     Write-Log "Downloading: $fileName" "INFO"
     
     try {
+        # 修复：使用简化的下载方式，避免 Register-ObjectEvent 的作用域问题
         $webClient = New-Object System.Net.WebClient
         $webClient.Headers.Add("User-Agent", "Qiusuo-Downloader/2.0")
         
-        # Progress event
-        $lastPercent = 0
+        # 显示进度条的简化方法
+        $lastPercent = -1
         $startTime = Get-Date
-        $lastBytes = 0
         
-        Register-ObjectEvent -InputObject $webClient -EventName "DownloadProgressChanged" -Action {
+        # 注册进度事件（修复作用域问题）
+        $eventAction = {
             $percent = $EventArgs.BytesReceived / $EventArgs.TotalBytesToReceive * 100
             $downloaded = Format-FileSize -Bytes $EventArgs.BytesReceived
             $total = Format-FileSize -Bytes $EventArgs.TotalBytesToReceive
-            $elapsed = (Get-Date) - $startTime
+            $elapsed = (Get-Date) - $startTimeForEvent
             $speed = if ($elapsed.TotalSeconds -gt 0) { 
                 $bytesPerSec = $EventArgs.BytesReceived / $elapsed.TotalSeconds
                 Format-FileSize -Bytes $bytesPerSec + "/s"
             } else { "0 B/s" }
-            $remainingSec = if ($speed -gt 0 -and $speed -ne "0 B/s") {
-                $speedBytes = [int]($bytesPerSec)
-                if ($speedBytes -gt 0) {
-                    $remaining = ($EventArgs.TotalBytesToReceive - $EventArgs.BytesReceived) / $speedBytes
+            $remainingSec = if ($elapsed.TotalSeconds -gt 0 -and $EventArgs.BytesReceived -gt 0) {
+                $bytesPerSec = $EventArgs.BytesReceived / $elapsed.TotalSeconds
+                if ($bytesPerSec -gt 0) {
+                    $remaining = ($EventArgs.TotalBytesToReceive - $EventArgs.BytesReceived) / $bytesPerSec
                     [TimeSpan]::FromSeconds($remaining).ToString("hh\:mm\:ss")
                 } else { "unknown" }
             } else { "unknown" }
-            if ($percent - $lastPercent -ge 1) {
+            if ($percent - $lastPercentForEvent -ge 1) {
                 Show-ProgressBar -Percent [int]$percent -Speed $speed -Remaining $remainingSec -Downloaded $downloaded -Total $total
-                $lastPercent = [int]$percent
+                $script:lastPercentForEvent = [int]$percent
             }
-        } | Out-Null
+        }
         
+        # 使用更简单的方法：同步下载并显示简单进度
         if ($resumeMode -and (Test-Path $tempPath)) {
             $webClient.DownloadFile($downloadUrl, $tempPath)
             Move-Item -Path $tempPath -Destination $savePath -Force
         }
         else {
-            $webClient.DownloadFile($downloadUrl, $savePath)
+            # 简单下载，定期显示进度
+            $webClient.DownloadFileAsync($downloadUrl, $savePath)
+            
+            # 等待下载完成并显示进度
+            while ($webClient.IsBusy) {
+                Start-Sleep -Milliseconds 500
+                if ($webClient.DownloadProgressChanged) {
+                    $percent = $webClient.BytesReceived / $fileSize * 100
+                    $downloaded = Format-FileSize -Bytes $webClient.BytesReceived
+                    $elapsed = (Get-Date) - $startTime
+                    $speed = if ($elapsed.TotalSeconds -gt 0) {
+                        $bytesPerSec = $webClient.BytesReceived / $elapsed.TotalSeconds
+                        Format-FileSize -Bytes $bytesPerSec + "/s"
+                    } else { "0 B/s" }
+                    $remaining = if ($elapsed.TotalSeconds -gt 0 -and $webClient.BytesReceived -gt 0) {
+                        $bytesPerSec = $webClient.BytesReceived / $elapsed.TotalSeconds
+                        if ($bytesPerSec -gt 0) {
+                            $remSec = ($fileSize - $webClient.BytesReceived) / $bytesPerSec
+                            [TimeSpan]::FromSeconds($remSec).ToString("hh\:mm\:ss")
+                        } else { "unknown" }
+                    } else { "unknown" }
+                    if ([int]$percent -ne $lastPercent) {
+                        Show-ProgressBar -Percent [int]$percent -Speed $speed -Remaining $remaining -Downloaded $downloaded -Total $sizeStr
+                        $lastPercent = [int]$percent
+                    }
+                }
+            }
         }
         
         Write-Host "`n"
@@ -708,6 +776,7 @@ function Download-File {
     }
 }
 #endregion
+
 #region Background Job Management
 $script:backgroundJobs = @{}
 $script:nextJobId = 1
@@ -756,6 +825,7 @@ function Start-BackgroundDownload {
         param($url, $path, $threads, $configDir)
         try {
             $webClient = New-Object System.Net.WebClient
+            $webClient.Headers.Add("User-Agent", "Qiusuo-Downloader/2.0")
             $webClient.DownloadFile($url, $path)
             return @{ Success = $true; Message = "Download completed" }
         }
@@ -798,6 +868,7 @@ function Show-Jobs {
         Write-Host " $($job.Name)" -ForegroundColor White -NoNewline
         Write-Host " [$jobState]" -ForegroundColor $statusColor -NoNewline
         Write-Host " $elapsedStr" -ForegroundColor Gray
+        Write-Host ""
     }
     Write-Host ("=" * 70) -ForegroundColor DarkGray
 }
@@ -982,6 +1053,7 @@ function Show-MuldlDialog {
     }
 }
 #endregion
+
 #region Tab Completion
 function Get-TabCompletion {
     param([string]$CurrentText)
@@ -1271,5 +1343,3 @@ function Start-InteractiveShell {
 
 # Start
 Start-InteractiveShell
-
-
