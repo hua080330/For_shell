@@ -5,7 +5,8 @@
 # Run this command in PowerShell:
 #   iex (irm https://raw.githubusercontent.com/hua080330/For_shell/main/setup.ps1)
 # ============================================================
-
+# 强制 PowerShell 使用 TLS 1.2 进行安全连接
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 #region Banner
 Clear-Host
 Write-Host @"
