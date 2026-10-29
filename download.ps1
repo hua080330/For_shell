@@ -196,22 +196,22 @@ function Get-FileIcon {
     param([string]$FileName)
     $ext = [System.IO.Path]::GetExtension($FileName).ToLower()
     switch ($ext) {
-        ".apk" { return "📦" }
-        ".ipa" { return "🍎" }
-        ".exe" { return "⚙️" }
-        ".msi" { return "📦" }
-        ".zip" { return "🗜️" }
-        ".rar" { return "🗜️" }
-        ".7z" { return "🗜️" }
-        ".pdf" { return "📄" }
-        ".txt" { return "📝" }
-        ".md" { return "📝" }
-        ".json" { return "🔧" }
-        ".xml" { return "🔧" }
-        ".png" { return "🖼️" }
-        ".jpg" { return "🖼️" }
-        ".jpeg" { return "🖼️" }
-        default { return "📄" }
+        ".apk" { return "" }
+        ".ipa" { return "" }
+        ".exe" { return "" }
+        ".msi" { return "" }
+        ".zip" { return "" }
+        ".rar" { return "" }
+        ".7z" { return "" }
+        ".pdf" { return "" }
+        ".txt" { return "" }
+        ".md" { return "" }
+        ".json" { return "" }
+        ".xml" { return "" }
+        ".png" { return "" }
+        ".jpg" { return "" }
+        ".jpeg" { return "" }
+        default { return "" }
     }
 }
 #endregion
@@ -477,7 +477,7 @@ function Search-Repos {
         $index = 1
         foreach ($repo in $repos) {
             $marker = if ($repo.name -eq $script:repoName) { " [ACTIVE]" } else { "" }
-            $isPrivate = if ($repo.private) { "🔒" } else { "🌐" }
+            $isPrivate = if ($repo.private) { "" } else { "" }
             Write-Host " [$index] $isPrivate $($repo.name)$marker" -ForegroundColor White
             if ($repo.description) {
                 Write-Host " $($repo.description)" -ForegroundColor Gray
